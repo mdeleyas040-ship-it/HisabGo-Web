@@ -1,0 +1,8 @@
+{
+  "name": "Hisab Go",
+  "description": "বাংলা ভাষায় আধুনিক ব্যক্তিগত আয়, ব্যয় ও ঋণ হিসাব ব্যবস্থাপনা অ্যাপ (Amar Hisab Personal Finance Tracker)",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
