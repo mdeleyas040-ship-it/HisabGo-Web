@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { useFinance } from '../context/FinanceContext';
 import { formatBnCurrency, toBnNum } from '../utils/formatters';
 import { SetBudgetModal } from './SetBudgetModal';
+import { BackupRestoreModal } from './BackupRestoreModal';
+import { FirebaseCloudSyncModal } from './FirebaseCloudSyncModal';
 
 export const MoreView: React.FC = () => {
   const {
@@ -13,11 +15,17 @@ export const MoreView: React.FC = () => {
     requestPushPermission,
     sendBudgetPushNotification,
     exportTransactionsCSV,
+    downloadBackup,
+    currentUser,
+    firebaseConfigStatus,
+    signOutFirebase,
     showToast,
     resetAllData,
   } = useFinance();
 
   const [budgetModalOpen, setBudgetModalOpen] = useState(false);
+  const [backupModalOpen, setBackupModalOpen] = useState(false);
+  const [cloudSyncModalOpen, setCloudSyncModalOpen] = useState(false);
   const [themeMode, setThemeMode] = useState<'light' | 'dark' | 'system'>('light');
   const [isBanglaDigits, setIsBanglaDigits] = useState(true);
   const [cloudSyncEnabled, setCloudSyncEnabled] = useState(true);
@@ -27,15 +35,21 @@ export const MoreView: React.FC = () => {
   const [emiAlertEnabled, setEmiAlertEnabled] = useState(true);
 
   const handleDriveBackup = () => {
-    showToast('গুগল ড্রাইভে ডাটা ব্যাকআপ সফল হয়েছে', 'add_to_drive');
+    // Honest status disclosure for Google Drive:
+    showToast('গুগল ড্রাইভ ইন্টিগ্রেশন এখনও কনফিগার করা হয়নি। নিরাপদ JSON ব্যাকআপ ব্যবহার করুন।', 'info');
+    setBackupModalOpen(true);
   };
 
   const handleRestoreData = () => {
-    showToast('ক্লাউড থেকে সংরক্ষিত হিসাব পুনরুদ্ধার সম্পন্ন হয়েছে', 'settings_backup_restore');
+    setBackupModalOpen(true);
   };
 
   const handleLogout = () => {
-    showToast('অ্যাকাউন্ট থেকে সফলভাবে লগআউট করা হয়েছে', 'logout');
+    if (currentUser) {
+      signOutFirebase();
+    } else {
+      showToast('অ্যাকাউন্ট থেকে সফলভাবে লগআউট করা হয়েছে', 'logout');
+    }
   };
 
   return (
@@ -47,7 +61,7 @@ export const MoreView: React.FC = () => {
             <img
               alt="Profile"
               className="w-16 h-16 rounded-full object-cover shadow-sm ring-2 ring-[#9cf5c1]"
-              src="https://lh3.googleusercontent.com/aida-public/AB6AXuDe5Q1bXUyXE-gGUILEgsvwPCUTgvCqguCvvWCumX5x8k6ANCv5lFm6LVsv8N1t53ti1nHN_o7JP8O6iSdFt1ejUL6zaBhrlP1jr6tMpMidTlW2SOAjiQ0DRiQW_lHOVuGeA4rhVqNTqWGBFGgyNsw1GQE0QlqHuEsBHvOVu6yKkK79YwggV755qf_1Y5rfy3P3V-0-yE5xzBg2Pwa3JWB0dhgM2sANxuYKWjDxhljPDyMRqsJifQYrvA"
+              src={currentUser?.photoURL || "https://lh3.googleusercontent.com/aida-public/AB6AXuDe5Q1bXUyXE-gGUILEgsvwPCUTgvCqguCvvWCumX5x8k6ANCv5lFm6LVsv8N1t53ti1nHN_o7JP8O6iSdFt1ejUL6zaBhrlP1jr6tMpMidTlW2SOAjiQ0DRiQW_lHOVuGeA4rhVqNTqWGBFGgyNsw1GQE0QlqHuEsBHvOVu6yKkK79YwggV755qf_1Y5rfy3P3V-0-yE5xzBg2Pwa3JWB0dhgM2sANxuYKWjDxhljPDyMRqsJifQYrvA"}
             />
             <button
               onClick={() => showToast('প্রোফাইল ছবি পরিবর্তন ফিচার শীঘ্রই আসছে', 'photo_camera')}
@@ -61,16 +75,22 @@ export const MoreView: React.FC = () => {
 
           <div className="flex flex-col min-w-0 flex-1">
             <div className="flex items-center gap-1">
-              <h2 className="text-[1.125rem] font-bold text-[#171d1b] truncate">তানভীর আহমেদ</h2>
+              <h2 className="text-[1.125rem] font-bold text-[#171d1b] truncate">
+                {currentUser?.displayName || 'তানভীর আহমেদ'}
+              </h2>
               <span className="material-symbols-outlined text-[#005232] text-[18px]">verified</span>
             </div>
-            <p className="text-[12px] text-[#3f4942] truncate">+৮৮০ ১৭ ১২৩৪ ৫৬৭৮ • tanvir.ahmed@email.com</p>
+            <p className="text-[12px] text-[#3f4942] truncate">
+              {currentUser?.email ? currentUser.email : '+৮৮০ ১৭ ১২৩৪ ৫৬৭৮ • tanvir.ahmed@email.com'}
+            </p>
             <div className="mt-1 flex items-center gap-1.5 flex-wrap">
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#9cf5c1] text-[#002111] text-[10px] font-bold">
                 <span className="material-symbols-outlined text-[13px]">workspace_premium</span>
-                প্রিমিয়াম সদস্য
+                {currentUser ? 'ক্লাউড সিঙ্কড সদস্য' : 'প্রিমিয়াম সদস্য'}
               </span>
-              <span className="text-[10px] text-[#006972] font-semibold">মেয়াদ: আজীবন</span>
+              <span className="text-[10px] text-[#006972] font-semibold">
+                {currentUser ? 'ল্যাপটপ ও মোবাইল সক্রিয়' : 'মেয়াদ: আজীবন'}
+              </span>
             </div>
           </div>
         </div>
@@ -274,51 +294,51 @@ export const MoreView: React.FC = () => {
           {/* Sync Status Header */}
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-start gap-3 min-w-0">
-              <div className="w-10 h-10 rounded-xl bg-[#9cf5c1] flex items-center justify-center text-[#005232] shrink-0">
-                <span className="material-symbols-outlined text-[22px]">cloud_done</span>
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                currentUser ? 'bg-[#9cf5c1] text-[#005232]' : 'bg-[#eaefeb] text-[#707973]'
+              }`}>
+                <span className="material-symbols-outlined text-[22px]">
+                  {currentUser ? 'cloud_done' : 'cloud_off'}
+                </span>
               </div>
               <div className="flex flex-col min-w-0">
                 <div className="flex items-center gap-1.5">
-                  <span className="text-[13px] font-semibold text-[#171d1b]">ক্লাউড সিঙ্ক (Firebase)</span>
-                  <span className="w-2 h-2 rounded-full bg-[#005232] inline-block animate-pulse"></span>
+                  <span className="text-[13px] font-semibold text-[#171d1b]">ক্লাউড সিঙ্ক (Firebase Firestore)</span>
+                  {currentUser && (
+                    <span className="w-2 h-2 rounded-full bg-[#005232] inline-block"></span>
+                  )}
                 </div>
                 <span className="text-[11px] text-[#006972] font-semibold">
-                  {cloudSyncEnabled ? 'মেঘ সিঙ্ক সক্রিয় • শেষ ব্যাকআপ: আজ, দুপুর ২:১৫' : 'মেঘ সিঙ্ক বন্ধ রাখা হয়েছে'}
+                  {currentUser
+                    ? `অ্যাকাউন্ট: ${currentUser.email || currentUser.displayName} • সিঙ্ক সক্রিয়`
+                    : firebaseConfigStatus.isConfigured
+                    ? 'লগইনされていない • সিঙ্ক শুরু করতে সাইন-ইন করুন'
+                    : 'ফায়ারবেস কনফিগ প্রয়োজন • সেটআপ করুন'}
                 </span>
               </div>
             </div>
             <button
-              onClick={() => {
-                const next = !cloudSyncEnabled;
-                setCloudSyncEnabled(next);
-                showToast(next ? 'ক্লাউড সিঙ্ক চালু করা হয়েছে' : 'ক্লাউড সিঙ্ক সাময়িক বন্ধ করা হয়েছে', 'cloud_sync');
-              }}
-              className={`w-12 h-7 rounded-full relative flex items-center px-1 shrink-0 transition-colors cursor-pointer ${
-                cloudSyncEnabled ? 'bg-[#005232]' : 'bg-[#d6dbd7]'
-              }`}
+              onClick={() => setCloudSyncModalOpen(true)}
+              className="px-3 py-1.5 rounded-full bg-[#eff5f1] hover:bg-[#eaefeb] text-[#005232] text-[12px] font-bold cursor-pointer transition-colors shrink-0"
               type="button"
             >
-              <span
-                className={`w-5 h-5 bg-white rounded-full shadow transform transition-transform ${
-                  cloudSyncEnabled ? 'translate-x-5' : 'translate-x-0'
-                }`}
-              ></span>
+              সিঙ্ক সেটিংস
             </button>
           </div>
 
           {/* Action Grid */}
           <div className="grid grid-cols-2 gap-2.5 pt-1">
             <button
-              onClick={handleDriveBackup}
+              onClick={() => setBackupModalOpen(true)}
               className="flex flex-col items-start gap-2 p-3 rounded-xl bg-[#eff5f1] hover:bg-[#eaefeb] active:bg-[#e4e9e5] transition-colors text-left shadow-xs cursor-pointer border border-[#dee4e0]"
               type="button"
             >
               <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center text-[#005232]">
-                <span className="material-symbols-outlined text-[18px]">add_to_drive</span>
+                <span className="material-symbols-outlined text-[18px]">download</span>
               </div>
               <div className="flex flex-col">
-                <span className="text-[12px] font-bold text-[#171d1b]">গুগল ড্রাইভে ব্যাকআপ</span>
-                <span className="text-[10px] text-[#3f4942]">ম্যানুয়ালি আপলোড নিন</span>
+                <span className="text-[12px] font-bold text-[#171d1b]">JSON ব্যাকআপ</span>
+                <span className="text-[10px] text-[#3f4942]">অফলাইনে ফাইল ডাউনলোড</span>
               </div>
             </button>
 
@@ -332,8 +352,24 @@ export const MoreView: React.FC = () => {
               </div>
               <div className="flex flex-col">
                 <span className="text-[12px] font-bold text-[#171d1b]">ডাটা রিস্টোর</span>
-                <span className="text-[10px] text-[#3f4942]">পূর্বে সংরক্ষিত ডাটা আনুন</span>
+                <span className="text-[10px] text-[#3f4942]">JSON ফাইল যাচাই ও লোড</span>
               </div>
+            </button>
+          </div>
+
+          {/* Google Drive Status Note */}
+          <div className="p-2.5 bg-[#fbfdfb] border border-[#eaefeb] rounded-xl flex items-center justify-between text-[11px]">
+            <div className="flex items-center gap-1.5 text-[#3f4942]">
+              <span className="material-symbols-outlined text-[16px] text-[#005232]">add_to_drive</span>
+              <span>গুগল ড্রাইভ ব্যাকআপ:</span>
+              <span className="text-[#b45309] font-semibold">OAuth কনফিগারেশন অপেক্ষমাণ</span>
+            </div>
+            <button
+              onClick={handleDriveBackup}
+              type="button"
+              className="text-[#005232] font-bold hover:underline cursor-pointer"
+            >
+              বিস্তারিত
             </button>
           </div>
 
@@ -342,8 +378,8 @@ export const MoreView: React.FC = () => {
             <div className="flex items-center gap-2.5 min-w-0">
               <span className="material-symbols-outlined text-[24px]">description</span>
               <div className="flex flex-col min-w-0">
-                <span className="text-[12px] font-bold">ডাটা এক্সপোর্ট (Excel / CSV)</span>
-                <span className="text-[10px] opacity-90 truncate">আপনার সমস্ত আর্থিক খতিয়ান ডাউনলোড করুন</span>
+                <span className="text-[12px] font-bold">লেনদেন এক্সপোর্ট (CSV)</span>
+                <span className="text-[10px] opacity-90 truncate">শুধুমাত্র আয় ও ব্যয়ের তালিকা স্প্রেডশিটে ডাউনলোড করুন</span>
               </div>
             </div>
             <button
@@ -351,7 +387,7 @@ export const MoreView: React.FC = () => {
               className="px-3.5 py-1.5 rounded-full bg-white text-[#005232] text-[12px] font-bold shrink-0 shadow-sm active:scale-95 transition-transform cursor-pointer hover:bg-[#eff5f1]"
               type="button"
             >
-              এক্সপোর্ট
+              CSV এক্সপোর্ট
             </button>
           </div>
         </div>
@@ -648,6 +684,18 @@ export const MoreView: React.FC = () => {
       <SetBudgetModal
         isOpen={budgetModalOpen}
         onClose={() => setBudgetModalOpen(false)}
+      />
+
+      {/* Backup & Restore Modal */}
+      <BackupRestoreModal
+        isOpen={backupModalOpen}
+        onClose={() => setBackupModalOpen(false)}
+      />
+
+      {/* Firebase Cloud Sync Modal */}
+      <FirebaseCloudSyncModal
+        isOpen={cloudSyncModalOpen}
+        onClose={() => setCloudSyncModalOpen(false)}
       />
     </div>
   );

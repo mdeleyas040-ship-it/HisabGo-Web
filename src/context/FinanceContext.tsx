@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { User, onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth';
 import {
   Transaction,
   BankLoan,
@@ -13,6 +14,15 @@ import {
   INITIAL_NOTIFICATIONS,
   EXPENSE_CATEGORIES_DATA,
 } from '../data/initialData';
+import { AppFinancialData, RestoreStrategy } from '../types/backup';
+import {
+  downloadBackupFile,
+  mergeFinancialData,
+  savePreRestoreSnapshot,
+  getPreRestoreSnapshot,
+} from '../utils/backupManager';
+import { auth, googleProvider, checkFirebaseConfig } from '../utils/firebase';
+import { uploadUserDataToCloud, fetchUserDataFromCloud } from '../utils/cloudSync';
 
 export type TabType = 'dashboard' | 'income' | 'expense' | 'debts' | 'settings';
 
@@ -37,8 +47,8 @@ interface FinanceContextType {
   expenseCategories: ExpenseCategorySummary[];
   quickEntryOpen: boolean;
   setQuickEntryOpen: (open: boolean) => void;
-  quickEntryType: 'income' | 'expense';
-  setQuickEntryType: (type: 'income' | 'expense') => void;
+  quickEntryType: 'income' | 'expense' | 'debt';
+  setQuickEntryType: (type: 'income' | 'expense' | 'debt') => void;
   toast: { message: string; icon: string; visible: boolean };
   showToast: (message: string, icon?: string) => void;
   resetAllData: () => void;
@@ -52,6 +62,23 @@ interface FinanceContextType {
   pushNotificationPermission: NotificationPermission | 'unsupported';
   requestPushPermission: () => Promise<boolean>;
   sendBudgetPushNotification: (forceCustomMessage?: string) => void;
+  // Backup & Restore
+  downloadBackup: () => void;
+  restoreFinancialData: (incomingData: AppFinancialData, strategy: RestoreStrategy) => boolean;
+  rollbackToSnapshot: () => boolean;
+  hasPreRestoreSnapshot: () => boolean;
+  // Firebase Auth & Cloud Sync
+  currentUser: User | null;
+  isCloudSyncing: boolean;
+  cloudSyncStatus: 'idle' | 'syncing' | 'success' | 'error';
+  cloudSyncError: string | null;
+  lastCloudSyncTime: string | null;
+  firebaseConfigStatus: { isConfigured: boolean; missingKeys: string[] };
+  signInWithGoogle: () => Promise<void>;
+  signOutFirebase: () => Promise<void>;
+  syncWithCloud: () => Promise<void>;
+  uploadLocalToCloud: () => Promise<void>;
+  downloadCloudToLocal: () => Promise<void>;
   // Computed values
   currentBalance: number;
   monthIncome: number;
@@ -93,7 +120,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   });
 
   const [quickEntryOpen, setQuickEntryOpen] = useState(false);
-  const [quickEntryType, setQuickEntryType] = useState<'income' | 'expense'>('expense');
+  const [quickEntryType, setQuickEntryType] = useState<'income' | 'expense' | 'debt'>('expense');
 
   const [toast, setToast] = useState<{ message: string; icon: string; visible: boolean }>({
     message: '',
@@ -293,6 +320,270 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setMonthlyBudgetState(45000);
     localStorage.clear();
     showToast('সকল হিসাব প্রাথমিক অবস্থায় ফিরিয়ে আনা হয়েছে', 'restart_alt');
+  };
+
+  // ----------------------------------------------------
+  // BACKUP & RESTORE METHODS
+  // ----------------------------------------------------
+  const downloadBackup = () => {
+    try {
+      const dataToBackup: AppFinancialData = {
+        transactions,
+        bankLoans,
+        personalDebts,
+        notifications,
+        monthlyBudget,
+      };
+      downloadBackupFile(dataToBackup);
+      showToast('JSON ব্যাকআপ ফাইল সফলভাবে ডাউনলোড হয়েছে', 'download');
+    } catch (err) {
+      console.error('Backup download error:', err);
+      showToast('ব্যাকআপ ডাউনলোড করতে ব্যর্থ হয়েছে', 'error');
+    }
+  };
+
+  const restoreFinancialData = (incomingData: AppFinancialData, strategy: RestoreStrategy): boolean => {
+    try {
+      // 1. Save safety snapshot of current data before applying changes
+      const currentData: AppFinancialData = {
+        transactions,
+        bankLoans,
+        personalDebts,
+        notifications,
+        monthlyBudget,
+      };
+      savePreRestoreSnapshot(currentData);
+
+      // 2. Compute final data based on merge or replace strategy
+      const finalData = mergeFinancialData(currentData, incomingData, strategy);
+
+      // 3. Atomically update React state
+      setTransactions(finalData.transactions);
+      setBankLoans(finalData.bankLoans);
+      setPersonalDebts(finalData.personalDebts);
+      setNotifications(finalData.notifications);
+      setMonthlyBudgetState(finalData.monthlyBudget);
+
+      // 4. Save to localStorage
+      localStorage.setItem('amar_hisab_transactions', JSON.stringify(finalData.transactions));
+      localStorage.setItem('amar_hisab_bank_loans', JSON.stringify(finalData.bankLoans));
+      localStorage.setItem('amar_hisab_personal_debts', JSON.stringify(finalData.personalDebts));
+      localStorage.setItem('amar_hisab_notifications', JSON.stringify(finalData.notifications));
+      localStorage.setItem('amar_hisab_monthly_budget', finalData.monthlyBudget.toString());
+
+      return true;
+    } catch (err) {
+      console.error('Restore error:', err);
+      return false;
+    }
+  };
+
+  const rollbackToSnapshot = (): boolean => {
+    try {
+      const snapshot = getPreRestoreSnapshot();
+      if (!snapshot || !snapshot.data) {
+        showToast('কোনো পূর্বের সেফগার স্ন্যাপশট পাওয়া যায়নি', 'warning');
+        return false;
+      }
+
+      setTransactions(snapshot.data.transactions);
+      setBankLoans(snapshot.data.bankLoans);
+      setPersonalDebts(snapshot.data.personalDebts);
+      setNotifications(snapshot.data.notifications);
+      setMonthlyBudgetState(snapshot.data.monthlyBudget);
+
+      localStorage.setItem('amar_hisab_transactions', JSON.stringify(snapshot.data.transactions));
+      localStorage.setItem('amar_hisab_bank_loans', JSON.stringify(snapshot.data.bankLoans));
+      localStorage.setItem('amar_hisab_personal_debts', JSON.stringify(snapshot.data.personalDebts));
+      localStorage.setItem('amar_hisab_notifications', JSON.stringify(snapshot.data.notifications));
+      localStorage.setItem('amar_hisab_monthly_budget', snapshot.data.monthlyBudget.toString());
+
+      showToast('পূর্বের অবস্থায় সফলভাবে রোলব্যাক করা হয়েছে', 'history');
+      return true;
+    } catch (err) {
+      console.error('Rollback error:', err);
+      showToast('রোলব্যাক ব্যর্থ হয়েছে', 'error');
+      return false;
+    }
+  };
+
+  const hasPreRestoreSnapshot = (): boolean => {
+    return getPreRestoreSnapshot() !== null;
+  };
+
+  // ----------------------------------------------------
+  // FIREBASE AUTH & CLOUD SYNC STATE & METHODS
+  // ----------------------------------------------------
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [isCloudSyncing, setIsCloudSyncing] = useState(false);
+  const [cloudSyncStatus, setCloudSyncStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
+  const [cloudSyncError, setCloudSyncError] = useState<string | null>(null);
+  const [lastCloudSyncTime, setLastCloudSyncTime] = useState<string | null>(() => {
+    return localStorage.getItem('hisab_go_last_cloud_sync_time');
+  });
+
+  const firebaseConfigStatus = checkFirebaseConfig();
+
+  // Listen to Auth State
+  useEffect(() => {
+    if (!auth) return;
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setCurrentUser(user);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const signInWithGoogle = async () => {
+    if (!auth || !googleProvider) {
+      showToast('ফায়ারবেস অথেনটিকেশন কনফিগার করা নেই', 'warning');
+      return;
+    }
+    try {
+      await signInWithPopup(auth, googleProvider);
+      showToast('গুগল অ্যাকাউন্ট দিয়ে সফলভাবে সাইন-ইন করা হয়েছে', 'verified');
+    } catch (err: unknown) {
+      console.error('Google Sign In Error:', err);
+      const msg = err instanceof Error ? err.message : 'লগইন ব্যর্থ হয়েছে';
+      showToast(`লগইন ব্যর্থ: ${msg}`, 'error');
+    }
+  };
+
+  const signOutFirebase = async () => {
+    if (!auth) return;
+    try {
+      await signOut(auth);
+      showToast('লগআউট সফল হয়েছে', 'logout');
+    } catch (err) {
+      console.error('Sign Out Error:', err);
+      showToast('লগআউট করতে সমস্যা হয়েছে', 'error');
+    }
+  };
+
+  const uploadLocalToCloud = async () => {
+    if (!currentUser) {
+      showToast('প্রথমে গুগল অ্যাকাউন্ট দিয়ে লগইন করুন', 'login');
+      return;
+    }
+    setIsCloudSyncing(true);
+    setCloudSyncStatus('syncing');
+    setCloudSyncError(null);
+
+    const localData: AppFinancialData = {
+      transactions,
+      bankLoans,
+      personalDebts,
+      notifications,
+      monthlyBudget,
+    };
+
+    const res = await uploadUserDataToCloud(currentUser.uid, localData);
+    setIsCloudSyncing(false);
+
+    if (res.success) {
+      setCloudSyncStatus('success');
+      const now = new Date().toISOString();
+      setLastCloudSyncTime(now);
+      localStorage.setItem('hisab_go_last_cloud_sync_time', now);
+      showToast('ক্লাউডে সকল ডাটা সফলভাবে সংরক্ষিত হয়েছে', 'cloud_done');
+    } else {
+      setCloudSyncStatus('error');
+      setCloudSyncError(res.error || 'ক্লাউড আপলোড ব্যর্থ');
+      showToast(res.error || 'ক্লাউড আপলোড ব্যর্থ', 'error');
+    }
+  };
+
+  const downloadCloudToLocal = async () => {
+    if (!currentUser) {
+      showToast('প্রথমে গুগল অ্যাকাউন্ট দিয়ে লগইন করুন', 'login');
+      return;
+    }
+    setIsCloudSyncing(true);
+    setCloudSyncStatus('syncing');
+    setCloudSyncError(null);
+
+    const res = await fetchUserDataFromCloud(currentUser.uid);
+    setIsCloudSyncing(false);
+
+    if (res.success && res.data) {
+      // Restore through safe merge
+      restoreFinancialData(res.data, 'replace');
+      setCloudSyncStatus('success');
+      const now = new Date().toISOString();
+      setLastCloudSyncTime(now);
+      localStorage.setItem('hisab_go_last_cloud_sync_time', now);
+      showToast('ক্লাউড থেকে সফলভাবে ডাটা সিঙ্ক করা হয়েছে', 'cloud_done');
+    } else if (res.success && !res.data) {
+      setCloudSyncStatus('idle');
+      showToast('ক্লাউডে এখনো কোনো ডাটা পাওয়া যায়নি', 'info');
+    } else {
+      setCloudSyncStatus('error');
+      setCloudSyncError(res.error || 'ক্লাউড ফেচ ব্যর্থ');
+      showToast(res.error || 'ক্লাউড ফেচ ব্যর্থ', 'error');
+    }
+  };
+
+  const syncWithCloud = async () => {
+    if (!currentUser) {
+      showToast('প্রথমে গুগল অ্যাকাউন্ট দিয়ে লগইন করুন', 'login');
+      return;
+    }
+    setIsCloudSyncing(true);
+    setCloudSyncStatus('syncing');
+    setCloudSyncError(null);
+
+    // 1. Fetch remote data
+    const res = await fetchUserDataFromCloud(currentUser.uid);
+    if (!res.success) {
+      setIsCloudSyncing(false);
+      setCloudSyncStatus('error');
+      setCloudSyncError(res.error || 'সিঙ্ক ব্যর্থ');
+      showToast(res.error || 'সিঙ্ক ব্যর্থ', 'error');
+      return;
+    }
+
+    const currentLocal: AppFinancialData = {
+      transactions,
+      bankLoans,
+      personalDebts,
+      notifications,
+      monthlyBudget,
+    };
+
+    if (!res.data) {
+      // First time user in cloud, upload local
+      const upRes = await uploadUserDataToCloud(currentUser.uid, currentLocal);
+      setIsCloudSyncing(false);
+      if (upRes.success) {
+        setCloudSyncStatus('success');
+        const now = new Date().toISOString();
+        setLastCloudSyncTime(now);
+        localStorage.setItem('hisab_go_last_cloud_sync_time', now);
+        showToast('লোকাল ডাটা ক্লাউডে সুরক্ষিত করা হয়েছে', 'cloud_done');
+      } else {
+        setCloudSyncStatus('error');
+        setCloudSyncError(upRes.error || 'আপলোড ব্যর্থ');
+      }
+      return;
+    }
+
+    // Two-way merge
+    const merged = mergeFinancialData(currentLocal, res.data, 'merge');
+    restoreFinancialData(merged, 'replace');
+
+    // Update cloud with merged version
+    const finalUpload = await uploadUserDataToCloud(currentUser.uid, merged);
+    setIsCloudSyncing(false);
+
+    if (finalUpload.success) {
+      setCloudSyncStatus('success');
+      const now = new Date().toISOString();
+      setLastCloudSyncTime(now);
+      localStorage.setItem('hisab_go_last_cloud_sync_time', now);
+      showToast('উভয়মুখী সিঙ্ক্রোনাইজেশন সম্পূর্ণ হয়েছে!', 'cloud_done');
+    } else {
+      setCloudSyncStatus('error');
+      setCloudSyncError(finalUpload.error || 'ক্লাউড আপডেট ব্যর্থ');
+    }
   };
 
   const exportTransactionsCSV = () => {
@@ -524,6 +815,23 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         pushNotificationPermission,
         requestPushPermission,
         sendBudgetPushNotification,
+        // Backup & Restore
+        downloadBackup,
+        restoreFinancialData,
+        rollbackToSnapshot,
+        hasPreRestoreSnapshot,
+        // Firebase Auth & Cloud Sync
+        currentUser,
+        isCloudSyncing,
+        cloudSyncStatus,
+        cloudSyncError,
+        lastCloudSyncTime,
+        firebaseConfigStatus,
+        signInWithGoogle,
+        signOutFirebase,
+        syncWithCloud,
+        uploadLocalToCloud,
+        downloadCloudToLocal,
         currentBalance,
         monthIncome,
         monthExpense,

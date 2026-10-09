@@ -13,6 +13,7 @@ export const IncomeView: React.FC = () => {
   } = useFinance();
 
   const [filterPeriod, setFilterPeriod] = useState<string>('march');
+  const [searchQuery, setSearchQuery] = useState<string>('');
   
   // Fast Entry Form States
   const [fastAmount, setFastAmount] = useState<string>('৩৫,০০০');
@@ -28,9 +29,36 @@ export const IncomeView: React.FC = () => {
   const incomeList = transactions.filter((t) => t.type === 'income');
 
   const filteredIncome = incomeList.filter((item) => {
-    if (filterPeriod === 'march') return item.date.startsWith('2025-03');
-    if (filterPeriod === 'feb') return item.date.startsWith('2025-02');
-    if (filterPeriod === 'jan') return item.date.startsWith('2025-01');
+    if (filterPeriod === 'march' && !item.date.startsWith('2025-03')) return false;
+    if (filterPeriod === 'feb' && !item.date.startsWith('2025-02')) return false;
+    if (filterPeriod === 'jan' && !item.date.startsWith('2025-01')) return false;
+
+    // Filter by search query (category/source, description/title/subtitle/notes, payment method, amount)
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      const matchCat = item.category ? item.category.toLowerCase().includes(q) : false;
+      const matchTitle = item.title ? item.title.toLowerCase().includes(q) : false;
+      const matchSubtitle = item.subtitle ? item.subtitle.toLowerCase().includes(q) : false;
+      const matchNotes = item.notes ? item.notes.toLowerCase().includes(q) : false;
+      const matchMethod = item.paymentMethod ? item.paymentMethod.toLowerCase().includes(q) : false;
+
+      // Amount checks (English digits, Bengali digits, formatted currency)
+      const amountStrEn = item.amount.toString();
+      const amountStrBn = toBnNum(item.amount);
+      const formattedBn = formatBnCurrency(item.amount);
+      const parsedQueryNum = parseBnNum(q);
+
+      const matchAmount =
+        amountStrEn.includes(q) ||
+        amountStrBn.includes(q) ||
+        formattedBn.includes(q) ||
+        (parsedQueryNum > 0 && amountStrEn.includes(parsedQueryNum.toString()));
+
+      if (!(matchCat || matchTitle || matchSubtitle || matchNotes || matchMethod || matchAmount)) {
+        return false;
+      }
+    }
+
     return true;
   });
 
@@ -236,51 +264,114 @@ export const IncomeView: React.FC = () => {
         <div className="flex items-center justify-between px-0.5">
           <h2 className="text-[1.125rem] font-bold text-[#171d1b]">আয়ের ইতিহাস</h2>
           <span className="text-[#006972] text-[12px] font-semibold flex items-center gap-0.5">
-            <span>সম্পূর্ণ খতিয়ান</span>
-            <span className="material-symbols-outlined text-[16px]">chevron_right</span>
+            <span>মোট {toBnNum(filteredIncome.length)}টি লেনদেন</span>
           </span>
         </div>
 
-        {filteredIncome.map((item) => (
-          <div key={item.id} className="space-y-1">
-            <div className="flex items-center justify-between px-1">
-              <span className="text-[11px] text-[#3f4942]">{item.dateLabelBn}</span>
-              <span className="text-[11px] text-[#005232] font-semibold">
-                +৳ {formatBnCurrency(item.amount)}
-              </span>
-            </div>
-
-            <div className="rounded-xl bg-white p-3.5 shadow-sm flex items-center justify-between border border-[#eaefeb] hover:border-[#9cf5c1] transition-colors">
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="w-11 h-11 rounded-xl bg-[#8feefc] text-[#006d77] flex items-center justify-center shrink-0">
-                  <span className="material-symbols-outlined text-[22px]">{item.categoryIcon}</span>
-                </div>
-                <div className="min-w-0">
-                  <p className="text-[#171d1b] text-[14px] font-semibold truncate">{item.title}</p>
-                  <p className="text-[#3f4942] text-[12px] truncate">{item.subtitle}</p>
-                </div>
-              </div>
-              <div className="text-right shrink-0 ml-2 flex items-center gap-2">
-                <div>
-                  <span className="text-[#005232] text-[14px] font-bold block">
-                    + ৳ {formatBnCurrency(item.amount)}
-                  </span>
-                  <p className="text-[#3f4942] text-[10px]">
-                    {item.notes ? 'জমা সম্পন্ন' : 'স্বয়ংক্রিয় জমা'}
-                  </p>
-                </div>
-                <button
-                  onClick={() => deleteTransaction(item.id)}
-                  className="text-[#6f7a71] hover:text-[#ba1a1a] p-1 rounded-full opacity-60 hover:opacity-100 transition-opacity"
-                  title="মুছে ফেলুন"
-                  type="button"
-                >
-                  <span className="material-symbols-outlined text-[16px]">delete_outline</span>
-                </button>
-              </div>
-            </div>
+        {/* Search Bar for Income */}
+        <div className="relative">
+          <div className="relative flex items-center">
+            <span className="material-symbols-outlined absolute left-3 text-[18px] text-[#6f7a71] pointer-events-none">
+              search
+            </span>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="আয় খুঁজুন (উৎস, বিবরণ বা পরিমাণ)..."
+              className="w-full pl-9 pr-9 py-2 bg-white rounded-xl border border-[#dee4e0] text-[13px] text-[#171d1b] placeholder:text-[#6f7a71] focus:outline-none focus:border-[#005232] focus:ring-1 focus:ring-[#005232] shadow-2xs transition-all"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2.5 text-[#6f7a71] hover:text-[#171d1b] p-0.5 rounded-full hover:bg-[#eaefeb] transition-colors"
+                title="মুছে ফেলুন"
+              >
+                <span className="material-symbols-outlined text-[16px]">close</span>
+              </button>
+            )}
           </div>
-        ))}
+
+          {searchQuery && (
+            <div className="flex items-center justify-between text-[11px] text-[#3f4942] mt-1.5 px-1">
+              <span>
+                "{searchQuery}" এর জন্য {toBnNum(filteredIncome.length)}টি আয় পাওয়া গেছে
+              </span>
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="text-[#005232] hover:underline font-semibold"
+              >
+                অনুসন্ধান মুছুন
+              </button>
+            </div>
+          )}
+        </div>
+
+        {filteredIncome.length === 0 ? (
+          <div className="text-center py-8 bg-white rounded-xl border border-dashed border-[#bec9bf] p-4">
+            <span className="material-symbols-outlined text-[36px] text-[#6f7a71]">
+              {searchQuery ? 'search_off' : 'savings'}
+            </span>
+            <p className="text-[13px] font-medium text-[#171d1b] mt-1.5">
+              {searchQuery
+                ? `"${searchQuery}" এর সাথে মিলে এমন কোনো আয়ের হিসাব পাওয়া যায়নি`
+                : 'কোনো আয়ের তথ্য পাওয়া যায়নি'}
+            </p>
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="mt-2.5 inline-flex items-center gap-1 px-3 py-1 bg-[#eaefeb] hover:bg-[#dee4e0] text-[#171d1b] text-[12px] font-medium rounded-full transition-colors cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-[14px]">refresh</span>
+                <span>অনুসন্ধান রিসেট করুন</span>
+              </button>
+            )}
+          </div>
+        ) : (
+          filteredIncome.map((item) => (
+            <div key={item.id} className="space-y-1">
+              <div className="flex items-center justify-between px-1">
+                <span className="text-[11px] text-[#3f4942]">{item.dateLabelBn}</span>
+                <span className="text-[11px] text-[#005232] font-semibold">
+                  +৳ {formatBnCurrency(item.amount)}
+                </span>
+              </div>
+
+              <div className="rounded-xl bg-white p-3.5 shadow-sm flex items-center justify-between border border-[#eaefeb] hover:border-[#9cf5c1] transition-colors">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-11 h-11 rounded-xl bg-[#8feefc] text-[#006d77] flex items-center justify-center shrink-0">
+                    <span className="material-symbols-outlined text-[22px]">{item.categoryIcon}</span>
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-[#171d1b] text-[14px] font-semibold truncate">{item.title}</p>
+                    <p className="text-[#3f4942] text-[12px] truncate">{item.subtitle}</p>
+                  </div>
+                </div>
+                <div className="text-right shrink-0 ml-2 flex items-center gap-2">
+                  <div>
+                    <span className="text-[#005232] text-[14px] font-bold block">
+                      + ৳ {formatBnCurrency(item.amount)}
+                    </span>
+                    <p className="text-[#3f4942] text-[10px]">
+                      {item.notes ? 'জমা সম্পন্ন' : 'স্বয়ংক্রিয় জমা'}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => deleteTransaction(item.id)}
+                    className="text-[#6f7a71] hover:text-[#ba1a1a] p-1 rounded-full opacity-60 hover:opacity-100 transition-opacity"
+                    title="মুছে ফেলুন"
+                    type="button"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">delete_outline</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))
+        )}
       </div>
 
       {/* Fast Income Entry Sheet (সহজ আয় অন্তর্ভুক্তি) as shown in Image 6 */}

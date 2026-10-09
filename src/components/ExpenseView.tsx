@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useFinance } from '../context/FinanceContext';
-import { formatBnCurrency, toBnNum } from '../utils/formatters';
+import { formatBnCurrency, parseBnNum, toBnNum } from '../utils/formatters';
 import { SetBudgetModal } from './SetBudgetModal';
 
 interface ExpenseViewProps {
@@ -20,25 +20,53 @@ export const ExpenseView: React.FC<ExpenseViewProps> = ({ onOpenQuickEntry }) =>
 
   const [filterType, setFilterType] = useState<string>('all');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState<string>('');
   const [budgetModalOpen, setBudgetModalOpen] = useState(false);
 
   // Filter only expenses
   const expenseList = transactions.filter((t) => t.type === 'expense');
 
-  // Filter based on chips
+  // Filter based on chips, selected category, and search query
   const filteredExpenses = expenseList.filter((item) => {
     if (selectedCategory && item.category !== selectedCategory) {
       return false;
     }
     if (filterType === 'today') {
-      return item.dateLabelBn.includes('আজ') || item.date === '2025-03-03';
+      if (!(item.dateLabelBn.includes('আজ') || item.date === '2025-03-03')) {
+        return false;
+      }
+    } else if (filterType === 'large') {
+      if (item.amount < 1000) {
+        return false;
+      }
     }
-    if (filterType === 'week') {
-      return true;
+
+    // Filter by search query (category, description/title/subtitle/notes, payment method, amount)
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      const matchCat = item.category ? item.category.toLowerCase().includes(q) : false;
+      const matchTitle = item.title ? item.title.toLowerCase().includes(q) : false;
+      const matchSubtitle = item.subtitle ? item.subtitle.toLowerCase().includes(q) : false;
+      const matchNotes = item.notes ? item.notes.toLowerCase().includes(q) : false;
+      const matchMethod = item.paymentMethod ? item.paymentMethod.toLowerCase().includes(q) : false;
+
+      // Amount checks (English digits, Bengali digits, formatted currency)
+      const amountStrEn = item.amount.toString();
+      const amountStrBn = toBnNum(item.amount);
+      const formattedBn = formatBnCurrency(item.amount);
+      const parsedQueryNum = parseBnNum(q);
+
+      const matchAmount =
+        amountStrEn.includes(q) ||
+        amountStrBn.includes(q) ||
+        formattedBn.includes(q) ||
+        (parsedQueryNum > 0 && amountStrEn.includes(parsedQueryNum.toString()));
+
+      if (!(matchCat || matchTitle || matchSubtitle || matchNotes || matchMethod || matchAmount)) {
+        return false;
+      }
     }
-    if (filterType === 'large') {
-      return item.amount >= 1000;
-    }
+
     return true;
   });
 
@@ -259,6 +287,47 @@ export const ExpenseView: React.FC<ExpenseViewProps> = ({ onOpenQuickEntry }) =>
           </button>
         </div>
 
+        {/* Search Bar */}
+        <div className="relative mb-2.5">
+          <div className="relative flex items-center">
+            <span className="material-symbols-outlined absolute left-3 text-[18px] text-[#6f7a71] pointer-events-none">
+              search
+            </span>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="খরচ খুঁজুন (ক্যাটাগরি, বিবরণ বা পরিমাণ)..."
+              className="w-full pl-9 pr-9 py-2 bg-white rounded-xl border border-[#dee4e0] text-[13px] text-[#171d1b] placeholder:text-[#6f7a71] focus:outline-none focus:border-[#005232] focus:ring-1 focus:ring-[#005232] shadow-2xs transition-all"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2.5 text-[#6f7a71] hover:text-[#171d1b] p-0.5 rounded-full hover:bg-[#eaefeb] transition-colors"
+                title="মুছে ফেলুন"
+              >
+                <span className="material-symbols-outlined text-[16px]">close</span>
+              </button>
+            )}
+          </div>
+
+          {searchQuery && (
+            <div className="flex items-center justify-between text-[11px] text-[#3f4942] mt-1.5 px-1">
+              <span>
+                "{searchQuery}" এর জন্য {toBnNum(filteredExpenses.length)}টি লেনদেন পাওয়া গেছে
+              </span>
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="text-[#812a00] hover:underline font-semibold"
+              >
+                অনুসন্ধান মুছুন
+              </button>
+            </div>
+          )}
+        </div>
+
         {/* Category Filter Chips */}
         <div className="flex items-center gap-1.5 overflow-x-auto pb-2 no-scrollbar">
           {[
@@ -289,9 +358,25 @@ export const ExpenseView: React.FC<ExpenseViewProps> = ({ onOpenQuickEntry }) =>
         {/* Grouped Transactions List */}
         <div className="mt-2 space-y-2">
           {filteredExpenses.length === 0 ? (
-            <div className="text-center py-8 bg-white rounded-xl border border-dashed border-[#bec9bf]">
-              <span className="material-symbols-outlined text-[36px] text-[#6f7a71]">receipt_long</span>
-              <p className="text-[13px] text-[#3f4942] mt-1">কোনো লেনদেন পাওয়া যায়নি</p>
+            <div className="text-center py-8 bg-white rounded-xl border border-dashed border-[#bec9bf] p-4">
+              <span className="material-symbols-outlined text-[36px] text-[#6f7a71]">
+                {searchQuery ? 'search_off' : 'receipt_long'}
+              </span>
+              <p className="text-[13px] font-medium text-[#171d1b] mt-1.5">
+                {searchQuery
+                  ? `"${searchQuery}" এর সাথে মিলে এমন কোনো খরচ পাওয়া যায়নি`
+                  : 'কোনো লেনদেন পাওয়া যায়নি'}
+              </p>
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="mt-2.5 inline-flex items-center gap-1 px-3 py-1 bg-[#eaefeb] hover:bg-[#dee4e0] text-[#171d1b] text-[12px] font-medium rounded-full transition-colors cursor-pointer"
+                >
+                  <span className="material-symbols-outlined text-[14px]">refresh</span>
+                  <span>অনুসন্ধান রিসেট করুন</span>
+                </button>
+              )}
             </div>
           ) : (
             filteredExpenses.map((item) => (

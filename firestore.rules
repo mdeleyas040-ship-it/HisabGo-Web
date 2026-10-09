@@ -1,0 +1,20 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Deny access by default to any unmapped collections
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Per-user financial records storage
+    // Only the authenticated owner of the document can read, write, or query their own data
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+
+      // Allow access to any subcollections under the user's document
+      match /{subcollection=**} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+    }
+  }
+}
