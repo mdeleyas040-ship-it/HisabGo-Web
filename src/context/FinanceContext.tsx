@@ -318,7 +318,14 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setPersonalDebts(INITIAL_PERSONAL_DEBTS);
     setNotifications(INITIAL_NOTIFICATIONS);
     setMonthlyBudgetState(45000);
-    localStorage.clear();
+    [
+      'amar_hisab_transactions',
+      'amar_hisab_bank_loans',
+      'amar_hisab_personal_debts',
+      'amar_hisab_notifications',
+      'amar_hisab_monthly_budget',
+      'hisab_go_last_cloud_sync_time',
+    ].forEach((key) => localStorage.removeItem(key));
     showToast('সকল হিসাব প্রাথমিক অবস্থায় ফিরিয়ে আনা হয়েছে', 'restart_alt');
   };
 
