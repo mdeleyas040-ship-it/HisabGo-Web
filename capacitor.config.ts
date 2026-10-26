@@ -4,7 +4,6 @@ const config: CapacitorConfig = {
   appId: 'com.amarhisab.hisabgo',
   appName: 'Hisab Go',
   webDir: 'dist',
-  bundledWebRuntime: false,
 };
 
 export default config;
